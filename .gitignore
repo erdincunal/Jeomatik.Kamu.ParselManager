@@ -1,0 +1,19 @@
+# Visual Studio and local settings
+.vs/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+# Build outputs
+[Bb]in/
+[Oo]bj/
+TestResults/
+*.log
+
+# Local credentials and environment files
+.env
+.env.*
+!.env.example
+*.pfx
+*.p12
