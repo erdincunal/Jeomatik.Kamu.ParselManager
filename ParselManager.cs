@@ -1,4 +1,4 @@
-﻿using KamuDatabase;
+using KamuDatabase;
 using Manager;
 using System;
 using System.Collections.Generic;
@@ -17,6 +17,8 @@ namespace Dashboard
     public partial class Manager : UserControl
     {
         internal ConnectionInfo DataConnectionInfo = new ConnectionInfo();
+        private readonly Dictionary<string, Kisi> _owners = new Dictionary<string, Kisi>(StringComparer.OrdinalIgnoreCase);
+        private readonly Dictionary<int, Dictionary<int, string>> _codeLists = new Dictionary<int, Dictionary<int, string>>();
         private PresentationDataService PresentationData => new PresentationDataService(DataConnectionInfo);
         private ListHelper Lists => new ListHelper(DataConnectionInfo);
         internal Dictionary<int, string> kisiAnlasmaDurumuDict;
@@ -46,6 +48,9 @@ namespace Dashboard
         public void SetConnection(ConnectionInfo dataConnectionInfo)
         {
             DataConnectionInfo = dataConnectionInfo ?? throw new ArgumentNullException(nameof(dataConnectionInfo));
+            // Önceki projenin kod açıklamalarını ve seçili kayıtlarını yeni bağlantıya taşımayız.
+            _codeLists.Clear();
+            Clear(ListViewType.Tum);
             CreateLists();
         }
 
@@ -75,15 +80,43 @@ namespace Dashboard
         #region ForColorLVBackColor
         public static void ColorListViewHeader(ref ListView list, Color backColor, Color foreColor)
         {
+            if (list == null) throw new ArgumentNullException(nameof(list));
+            // Her ListView için olayları yalnız bir kez bağla; yenilemeler sadece renkleri değiştirir.
+            // Zayıf anahtar, kapatılmış kontrollerin statik önbellekte tutulmasını önler.
+            HeaderColors colors = HeaderStyles.GetValue(list, key =>
+            {
+                key.DrawColumnHeader += DrawStyledHeader;
+                key.DrawItem += BodyDraw;
+                key.DrawSubItem += DrawStyledSubItem;
+                return new HeaderColors();
+            });
+            colors.Background = backColor;
+            colors.Foreground = foreColor;
             list.OwnerDraw = true;
-            list.DrawColumnHeader +=
-                new DrawListViewColumnHeaderEventHandler
-                (
-                    (sender, e) => HeaderDraw(sender, e, backColor, foreColor)
-                );
-            list.DrawItem += new DrawListViewItemEventHandler(BodyDraw);
+            list.Invalidate();
         }
 
+        private sealed class HeaderColors
+        {
+            internal Color Background;
+            internal Color Foreground;
+        }
+
+        private static readonly System.Runtime.CompilerServices.ConditionalWeakTable<ListView, HeaderColors>
+            HeaderStyles = new System.Runtime.CompilerServices.ConditionalWeakTable<ListView, HeaderColors>();
+
+        private static void DrawStyledHeader(object sender, DrawListViewColumnHeaderEventArgs e)
+        {
+            if (sender is ListView list && HeaderStyles.TryGetValue(list, out HeaderColors colors))
+                HeaderDraw(sender, e, colors.Background, colors.Foreground);
+            else
+                e.DrawDefault = true;
+        }
+
+        private static void DrawStyledSubItem(object sender, DrawListViewSubItemEventArgs e)
+        {
+            e.DrawDefault = true;
+        }
         private static void HeaderDraw(object sender, DrawListViewColumnHeaderEventArgs e, Color backColor, Color foreColor)
         {
             using (SolidBrush backBrush = new SolidBrush(backColor))
@@ -104,73 +137,72 @@ namespace Dashboard
 
         #endregion
 
+        private static void ClearList(ListView list)
+        {
+            list.Items.Clear();
+            // Items.Clear grupları silmez; aksi halde her yenilemede boş gruplar birikir.
+            list.Groups.Clear();
+        }
+
+        /// <summary>İstenen görünümü temizler; kişi görünümü parselin diğer listelerini korur.</summary>
         public void Clear(ListViewType listViewType)
         {
-            try
+            switch (listViewType)
             {
-                switch (listViewType)
-                {
-                    case ListViewType.Malik:
-                        listViewMalik.Items.Clear();
-                        propertyGridMalik.SelectedObject = null;
-                        tabControlParsel.TabPages[1].Text = "Malik";
-                        break;
-                    case ListViewType.Kamu:
-                        listViewKamu.Items.Clear();
-                        break;
-                    case ListViewType.Dava:
-                        listViewDava.Items.Clear();
-                        break;
-                    case ListViewType.Mustemilat:
-                        listViewMustemilat.Items.Clear();
-                        break;
-                    case ListViewType.Mevsimlik:
-                        listViewMustemilat.Items.Clear();
-                        break;
-                    default:
-                        listViewMalik.Items.Clear();
-                        listViewKamu.Items.Clear();
-                        listViewDava.Items.Clear();
-                        listViewMustemilat.Items.Clear();
-                        propertyGridMalik.SelectedObject = null;
-                        tabControlParsel.TabPages[0].Text = "Parsel";
-                        tabControlParsel.TabPages[1].Text = "Malik";
-                        propertyGridParsel.SelectedObject = null;
-                        break;
-                }
-            }
-            catch (System.Exception)
-            {
-                throw;
+                case ListViewType.Kisi:
+                    propertyGridMalik.SelectedObject = null;
+                    tabPageMalik.Text = "Malik";
+                    break;
+                case ListViewType.Malik:
+                    ClearList(listViewMalik);
+                    propertyGridMalik.SelectedObject = null;
+                    tabPageMalik.Text = "Malik";
+                    colMalikHisse.Text = "Hisse";
+                    ColorListViewHeader(ref listViewMalik, SystemColors.Menu, SystemColors.MenuText);
+                    break;
+                case ListViewType.Kamu:
+                    ClearList(listViewKamu);
+                    break;
+                case ListViewType.Dava:
+                    ClearList(listViewDava);
+                    break;
+                case ListViewType.Mustemilat:
+                case ListViewType.Mevsimlik:
+                    ClearList(listViewMustemilat);
+                    break;
+                default:
+                    Clear(ListViewType.Malik);
+                    ClearList(listViewKamu);
+                    ClearList(listViewDava);
+                    ClearList(listViewMustemilat);
+                    propertyGridParsel.SelectedObject = null;
+                    tabPageParsel.Text = "Parsel";
+                    break;
             }
         }
 
+        /// <summary>Parsel veya kişi kimliğiyle ilgili görünümü yükler. UI iş parçacığında çağrılmalıdır.</summary>
         public void FillListView(string GlobalID, ListViewType listViewType)
         {
+            if (!Enum.IsDefined(typeof(ListViewType), listViewType))
+                throw new ArgumentOutOfRangeException(nameof(listViewType));
+
+            ListView[] lists = { listViewMalik, listViewKamu, listViewDava, listViewMustemilat };
+            foreach (ListView list in lists)
+                list.BeginUpdate();
+            // Toplu güncelleme titremeyi azaltır. DoEvents kullanmayarak yükleme sırasında
+            // yeniden giriş ve henüz tamamlanmamış listeler üzerinden seçim işlemlerini önleriz.
             try
             {
-                Application.DoEvents();
                 Clear(listViewType);
                 switch (listViewType)
                 {
-                    case ListViewType.Kisi:
-                        FillGridMalik(GlobalID);
-                        break;
-                    case ListViewType.Malik:
-                        FillListViewMalik(GlobalID);
-                        break;
-                    case ListViewType.Kamu:
-                        FillListViewKamu(GlobalID);
-                        break;
-                    case ListViewType.Dava:
-                        FillListViewDava(GlobalID);
-                        break;
+                    case ListViewType.Kisi: FillGridMalik(GlobalID); break;
+                    case ListViewType.Malik: FillListViewMalik(GlobalID); break;
+                    case ListViewType.Kamu: FillListViewKamu(GlobalID); break;
+                    case ListViewType.Dava: FillListViewDava(GlobalID); break;
                     case ListViewType.Mustemilat:
-                        FillListViewMusMev(GlobalID);
-                        break;
-                    case ListViewType.Mevsimlik:
-                        FillListViewMusMev(GlobalID);
-                        break;
+                    case ListViewType.Mevsimlik: FillListViewMusMev(GlobalID); break;
                     case ListViewType.Tum:
                         FillGridParsel(GlobalID);
                         FillListViewMalik(GlobalID);
@@ -178,21 +210,19 @@ namespace Dashboard
                         FillListViewDava(GlobalID);
                         FillListViewMusMev(GlobalID);
                         break;
-                    default:
-                        break;
                 }
             }
-            catch (System.Exception)
+            finally
             {
-                throw;
+                foreach (ListView list in lists)
+                    list.EndUpdate();
             }
         }
-
         #region MustemilatMevsimlik
         #region MustemilatMevsimlikDelegation
         public ListView ListViewMusMev
         {
-            get => ListViewMusMev = listViewMustemilat;
+            get => listViewMustemilat;
             set => listViewMustemilat = value;
         }
 
@@ -201,13 +231,7 @@ namespace Dashboard
 
         private void ListViewMusMev_MouseDoubleClick(object sender, MouseEventArgs e)
         {
-            MouseButtons Button = e.Button;
-            int X = e.X;
-            int Y = e.Y;
-            int Clicks = e.Clicks;
-            int Delta = e.Delta;
-            MouseEventArgs mouseEventArgs = new MouseEventArgs(Button, Clicks, X, Y, Delta);
-            ListViewMustemilatMevsimlikMouseDoubleClick?.Invoke(this, mouseEventArgs);
+            ListViewMustemilatMevsimlikMouseDoubleClick?.Invoke(this, e);
         }
         #endregion
         /// <summary>Parselin müştemilat ve mevsimlik kayıtlarını tek listede tür ayrımıyla gösterir.</summary>
@@ -215,6 +239,7 @@ namespace Dashboard
         {
             try
             {
+                _owners.Clear();
                 List<Mustemilat> Mustemilatlar = PresentationData.GetParcelFixtures(parselGlobalID);
                 int countMustemilatlar = Mustemilatlar.Count;
 
@@ -253,12 +278,23 @@ namespace Dashboard
             }
         }
 
+        private Kisi ReadOwner(Kisi owner)
+        {
+            // Veri hizmeti bazı kayıtlarda yalnız malik kimliğini verir. Tam kişiyi bir kez
+            // oku; aynı yenilemede müştemilat ve mevsimlik satırları bu sonucu paylaşır.
+            if (owner == null || string.IsNullOrWhiteSpace(owner.GlobalID))
+                return owner;
+            if (!_owners.TryGetValue(owner.GlobalID, out Kisi person))
+                _owners[owner.GlobalID] = person = PresentationData.GetPerson(owner.GlobalID);
+            return person ?? owner;
+        }
+
         private void MustemilatListele(ListViewGroup lvg, List<Mustemilat> Mustemilatlar, ref double dblToplamAdet, ref double dblToplamBedel)
         {
             double dblTutar;
             foreach (Mustemilat MyMustemilat in Mustemilatlar)
             {
-                Kisi MySahip = PresentationData.GetPerson(MyMustemilat.Sahip.GlobalID);
+                Kisi MySahip = ReadOwner(MyMustemilat.Sahip);
 
                 string strGlobalID = MyMustemilat.GlobalID;
                 string strTanim = MyMustemilat.Tanim;
@@ -292,7 +328,7 @@ namespace Dashboard
             double dblTutar;
             foreach (Mevsimlik MyMevsimlik in Mevsimlikler)
             {
-                Kisi MySahip = PresentationData.GetPerson(MyMevsimlik.Sahip.GlobalID);
+                Kisi MySahip = ReadOwner(MyMevsimlik.Sahip);
 
                 string strGlobalID = MyMevsimlik.GlobalID;
                 string strTanim = MyMevsimlik.Tanim;
@@ -340,7 +376,7 @@ namespace Dashboard
         #region DavaDelegation
         public ListView ListViewDava
         {
-            get => ListViewDava = listViewDava;
+            get => listViewDava;
             set => listViewDava = value;
         }
 
@@ -349,13 +385,7 @@ namespace Dashboard
 
         private void ListViewDava_MouseDoubleClick(object sender, MouseEventArgs e)
         {
-            MouseButtons Button = e.Button;
-            int X = e.X;
-            int Y = e.Y;
-            int Clicks = e.Clicks;
-            int Delta = e.Delta;
-            MouseEventArgs mouseEventArgs = new MouseEventArgs(Button, Clicks, X, Y, Delta);
-            ListViewDavaMouseDoubleClick?.Invoke(this, mouseEventArgs);
+            ListViewDavaMouseDoubleClick?.Invoke(this, e);
         }
         #endregion
         private void FillListViewDava(string parselGlobalID)
@@ -363,9 +393,10 @@ namespace Dashboard
             try
             {
                 List<Dava> Davalar = PresentationData.GetParcelLawsuits(parselGlobalID);
-                int TurSayisi = Lists.CreateComboDictionary(18).Count - 1;
 
-                for (int i = 1; i <= TurSayisi; i++)
+
+                // Tür kodlarının ardışık olması gerekmez; bilinmeyen kodlu kayıtları da göster.
+                foreach (int i in Davalar.Select(item => item.Turu).Distinct().OrderBy(type => type))
                 {
                     List<Dava> DavaTurleri = Davalar.Where(x => x.Turu == i).ToList();
                     if (DavaTurleri.Any())
@@ -413,7 +444,7 @@ namespace Dashboard
         #region KamuDelegation
         public ListView ListViewKamu
         {
-            get => ListViewKamu = listViewKamu;
+            get => listViewKamu;
             set => listViewKamu = value;
         }
 
@@ -422,24 +453,19 @@ namespace Dashboard
 
         private void ListViewKamu_MouseDoubleClick(object sender, MouseEventArgs e)
         {
-            MouseButtons Button = e.Button;
-            int X = e.X;
-            int Y = e.Y;
-            int Clicks = e.Clicks;
-            int Delta = e.Delta;
-            MouseEventArgs mouseEventArgs = new MouseEventArgs(Button, Clicks, X, Y, Delta);
-            ListViewKamuMouseDoubleClick?.Invoke(this, mouseEventArgs);
+            ListViewKamuMouseDoubleClick?.Invoke(this, e);
         }
         #endregion
 
         private double FillListViewKamu(string parselGlobalID)
         {
             List<Kamulastirma> Alanlar = PresentationData.GetParcelAcquisitionAreas(parselGlobalID);
-            int TurSayisi = Lists.CreateComboDictionary(13).Count - 1;
+
             double dblGenelToplamAlan = 0;
             double dblGenelToplamBedel = 0;
             int intAlanCesitSayisi = 0;
-            for (int i = 1; i <= TurSayisi; i++)
+            // Kod listesi uzunluğundan tür üretmek yerine kayıtlardaki gerçek türleri grupla.
+            foreach (int i in Alanlar.Select(item => item.Turu).Distinct().OrderBy(type => type))
             {
                 double dblTutar = 0;
                 double dblToplamAlan = 0;
@@ -475,11 +501,12 @@ namespace Dashboard
             int AlanSayisi = 0;
             foreach (Kamulastirma MyKamulastirma in AlanlarGrubu)
             {
-                string strTanim = string.Empty;
+                string strTanim = KodListeMetni(13, MyKamulastirma.Turu);
                 Color colorTxt = Color.Gray;
                 string strGlobalID = MyKamulastirma.GlobalID;
                 double dblAlan = MyKamulastirma.Alan;
                 double dblBedel = MyKamulastirma.Bedel;
+                dblTutar = dblAlan * dblBedel;
                 string strTuru = KodListeMetni(13, MyKamulastirma.Turu);
                 string strAsamasi = KodListeMetni(15, MyKamulastirma.Asamasi);
 
@@ -545,7 +572,7 @@ namespace Dashboard
         #region MalikDelegation
         public ListView ListViewMalik
         {
-            get => ListViewMalik = listViewMalik;
+            get => listViewMalik;
             set => listViewMalik = value;
         }
 
@@ -554,13 +581,7 @@ namespace Dashboard
 
         private void ListViewMalik_MouseDoubleClick(object sender, MouseEventArgs e)
         {
-            MouseButtons Button = e.Button;
-            int X = e.X;
-            int Y = e.Y;
-            int Clicks = e.Clicks;
-            int Delta = e.Delta;
-            MouseEventArgs mouseEventArgs = new MouseEventArgs(Button, Clicks, X, Y, Delta);
-            ListViewMalikMouseDoubleClick?.Invoke(this, mouseEventArgs);
+            ListViewMalikMouseDoubleClick?.Invoke(this, e);
         }
         #endregion
         private void FillListViewMalik(string parselGlobalID)
@@ -574,7 +595,7 @@ namespace Dashboard
                 double HisseToplam = 0;
                 foreach (Kisi MySahip in sahipler)
                 {
-                    Hisse MyHisse = MySahip.Hisse;
+                    Hisse MyHisse = MySahip?.Hisse;
                     if (MyHisse == null)
                         continue;
 
@@ -599,11 +620,11 @@ namespace Dashboard
                         strHisse = MyHisse.ToString();
                         strTelefon = MySahip.Telefon;
                         strAdres = MySahip.Adres;
-                        if (MySahip.Cinsiyet.Length > 0)
+                        if (!string.IsNullOrEmpty(MySahip.Cinsiyet))
                         {
                             strCinsiyet = MySahip.Cinsiyet.Substring(0, 1).ToUpper();
                         }
-                        strDurumu = MySahip.Durumu.Trim().ToUpper();
+                        strDurumu = (MySahip.Durumu ?? string.Empty).Trim().ToUpper();
                         if (MyHisse != null && MyHisse.Payda != 0)
                             HisseToplam += (double)MyHisse.Pay / MyHisse.Payda;                    
                     }
@@ -739,7 +760,10 @@ namespace Dashboard
 
         private string KodListeMetni(int ListID, int Kod)
         {
-            return Lists.CreateComboDictionary(ListID).TryGetValue(Kod, out string value) ? value : string.Empty;
+            // Kod açıklamaları bağlantı değişene kadar önbellekte kalır; satır başına sorgu yapmayız.
+            if (!_codeLists.TryGetValue(ListID, out Dictionary<int, string> values))
+                _codeLists[ListID] = values = Lists.CreateComboDictionary(ListID);
+            return values.TryGetValue(Kod, out string value) ? value : $"Hatalı Kodlama ({Kod})";
         }
 
         private bool ValidDate(DateTime dtTarih)
@@ -799,6 +823,8 @@ namespace Dashboard
 
         private void FillGridMalik(string kisiGlobalID, Hisse hisse = null)
         {
+            propertyGridMalik.SelectedObject = null;
+            tabPageMalik.Text = "Malik";
             try
             {
                 Kisi MyKisi = PresentationData.GetPerson(kisiGlobalID);
@@ -849,9 +875,13 @@ namespace Dashboard
             try
             {
                 model.Apply();
-                if (!PresentationData.UpdatePerson(model.Source))
+                // Kişi ve hisse ayrı kayıtlardır. Yalnız değişen alanın ait olduğu kaydı yazmak,
+                // ilgisiz güncellemeleri ve iki yazmadan birinin başarısız olması riskini azaltır.
+                bool shareProperty = e.ChangedItem.PropertyDescriptor?.Name == nameof(GridMalikKodModel.TescilDurumu)
+                    || e.ChangedItem.PropertyDescriptor?.Name == nameof(GridMalikKodModel.Dusunceler);
+                if (!shareProperty && !PresentationData.UpdatePerson(model.Source))
                     throw new InvalidOperationException("Malik bilgisi kaydedilemedi.");
-                if (model.Share != null && !PresentationData.UpdateShare(model.Share))
+                if (shareProperty && model.Share != null && !PresentationData.UpdateShare(model.Share))
                     throw new InvalidOperationException("Hisse bilgisi kaydedilemedi.");
             }
             catch (Exception ex)

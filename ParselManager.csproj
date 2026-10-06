@@ -34,9 +34,6 @@
     </ApplicationIcon>
   </PropertyGroup>
   <ItemGroup>
-    <Reference Include="Kamu.Object">
-      <HintPath>..\ObjectModel\bin\Release\Kamu.Object.dll</HintPath>
-    </Reference>
     <Reference Include="System" />
     <Reference Include="System.Core" />
     <Reference Include="System.Windows.Forms.DataVisualization" />
@@ -73,6 +70,11 @@
       <Project>{7A2F6B83-1E5A-4E3A-9F2C-8C8C34C4D001}</Project>
       <Name>Kamu.Data</Name>
       <Private>True</Private>
+    </ProjectReference>
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\ObjectModel\KamuObject.csproj">
+      <Project>{918B0C52-C7BB-44A3-9497-0EEC6ACA2258}</Project><Name>Kamu.Object</Name><Private>True</Private>
     </ProjectReference>
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />

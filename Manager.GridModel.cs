@@ -7,6 +7,7 @@ namespace Dashboard
 {
     public partial class Manager
     {
+        /// <summary>Veritabanı kodlarını kullanıcıya açıklama olarak sunan parsel düzenleme modeli.</summary>
         private class GridParselKodModel
         {
             private readonly Dictionary<string, Dictionary<int, string>> _codeLists;
@@ -45,17 +46,23 @@ namespace Dashboard
             internal Kamu.Parsel Source { get; }
 
             internal IEnumerable<string> GetStandardValues(string propertyName) =>
-                _codeLists.TryGetValue(propertyName, out Dictionary<int, string> values)
+                propertyName != null && _codeLists.TryGetValue(propertyName, out Dictionary<int, string> values)
                     ? values.OrderBy(item => item.Key).Select(item => item.Value)
                     : Enumerable.Empty<string>();
 
             internal void Apply()
             {
-                Source.KadastralDurum = CodeValue(_codeLists[nameof(KadastralDurum)], KadastralDurum, Source.KadastralDurum);
-                Source.MalikTipi = CodeValue(_codeLists[nameof(MalikTipi)], MalikTipi, Source.MalikTipi);
-                Source.IstimlakTuru = CodeValue(_codeLists[nameof(IstimlakTuru)], IstimlakTuru, Source.IstimlakTuru);
-                Source.IstimlakSerhi = CodeValue(_codeLists[nameof(IstimlakSerhi)], IstimlakSerhi, Source.IstimlakSerhi);
-                Source.EdinimDurumu = CodeValue(_codeLists[nameof(EdinimDurumu)], EdinimDurumu, Source.EdinimDurumu);
+                // Önce bütün kodları doğrula; bir seçim geçersizse Source kısmen değişmesin.
+                int codeKadastralDurum = CodeValue(_codeLists[nameof(KadastralDurum)], KadastralDurum, Source.KadastralDurum);
+                int codeMalikTipi = CodeValue(_codeLists[nameof(MalikTipi)], MalikTipi, Source.MalikTipi);
+                int codeIstimlakTuru = CodeValue(_codeLists[nameof(IstimlakTuru)], IstimlakTuru, Source.IstimlakTuru);
+                int codeIstimlakSerhi = CodeValue(_codeLists[nameof(IstimlakSerhi)], IstimlakSerhi, Source.IstimlakSerhi);
+                int codeEdinimDurumu = CodeValue(_codeLists[nameof(EdinimDurumu)], EdinimDurumu, Source.EdinimDurumu);
+                Source.KadastralDurum = codeKadastralDurum;
+                Source.MalikTipi = codeMalikTipi;
+                Source.IstimlakTuru = codeIstimlakTuru;
+                Source.IstimlakSerhi = codeIstimlakSerhi;
+                Source.EdinimDurumu = codeEdinimDurumu;
                 Source.IstimlakDisi = IstimlakDisi;
                 Source.DavaDurumu10 = DavaDurumu10;
                 Source.DavaDurumu27 = DavaDurumu27;
@@ -98,6 +105,7 @@ namespace Dashboard
             public string Aciklama { get; set; }
         }
 
+        /// <summary>Kişi alanları ile isteğe bağlı parsel hissesi alanlarını aynı PropertyGrid'de sunar.</summary>
         private class GridMalikKodModel
         {
             private readonly Dictionary<string, Dictionary<int, string>> _codeLists;
@@ -135,20 +143,27 @@ namespace Dashboard
             internal Kamu.Hisse Share { get; }
 
             internal IEnumerable<string> GetStandardValues(string propertyName) =>
-                _codeLists.TryGetValue(propertyName, out Dictionary<int, string> values)
+                propertyName != null && _codeLists.TryGetValue(propertyName, out Dictionary<int, string> values)
                     ? values.OrderBy(item => item.Key).Select(item => item.Value)
                     : Enumerable.Empty<string>();
 
             internal void Apply()
             {
-                Source.AnlasmaDurumu = CodeValue(_codeLists[nameof(AnlasmaDurumu)], AnlasmaDurumu, Source.AnlasmaDurumu);
-                Source.DavetiyeAlinmaDurumu = CodeValue(_codeLists[nameof(DavetiyeAlinmaDurumu)], DavetiyeAlinmaDurumu, Source.DavetiyeAlinmaDurumu);
-                Source.DavetiyeTebligDurumu = CodeValue(_codeLists[nameof(DavetiyeTebligDurumu)], DavetiyeTebligDurumu, Source.DavetiyeTebligDurumu);
-                Source.GorusmeDurumu = CodeValue(_codeLists[nameof(GorusmeDurumu)], GorusmeDurumu, Source.GorusmeDurumu);
+                // Mirasçı görünümünde Share bulunmayabilir. Doğrulama tamamlanmadan
+                // kişi veya hisse nesnesine değer yazma.
+                int codeAnlasmaDurumu = CodeValue(_codeLists[nameof(AnlasmaDurumu)], AnlasmaDurumu, Source.AnlasmaDurumu);
+                int codeDavetiyeAlinmaDurumu = CodeValue(_codeLists[nameof(DavetiyeAlinmaDurumu)], DavetiyeAlinmaDurumu, Source.DavetiyeAlinmaDurumu);
+                int codeDavetiyeTebligDurumu = CodeValue(_codeLists[nameof(DavetiyeTebligDurumu)], DavetiyeTebligDurumu, Source.DavetiyeTebligDurumu);
+                int codeGorusmeDurumu = CodeValue(_codeLists[nameof(GorusmeDurumu)], GorusmeDurumu, Source.GorusmeDurumu);
+                int codeTescilDurumu = Share == null ? 0 : CodeValue(_codeLists[nameof(TescilDurumu)], TescilDurumu, Share.TescilDurumu);
+                Source.AnlasmaDurumu = codeAnlasmaDurumu;
+                Source.DavetiyeAlinmaDurumu = codeDavetiyeAlinmaDurumu;
+                Source.DavetiyeTebligDurumu = codeDavetiyeTebligDurumu;
+                Source.GorusmeDurumu = codeGorusmeDurumu;
                 Source.AnlasmaDusunceler = AnlasmaDusunceler;
                 if (Share != null)
                 {
-                    Share.TescilDurumu = CodeValue(_codeLists[nameof(TescilDurumu)], TescilDurumu, Share.TescilDurumu);
+                    Share.TescilDurumu = codeTescilDurumu;
                     Share.Aciklama = Dusunceler;
                 }
             }
@@ -182,7 +197,9 @@ namespace Dashboard
 
         private static int CodeValue(Dictionary<int, string> values, string text, int currentCode)
         {
-            if (values != null && values.TryGetValue(currentCode, out string currentText) && currentText == text)
+            // Eski verideki tanınmayan bir kod değiştirilmediyse koru. Böylece açıklama gibi
+            // başka bir alanı kaydetmek için önce bütün eski kodları düzeltmek gerekmez.
+            if (string.Equals(CodeText(values, currentCode), text, StringComparison.Ordinal))
                 return currentCode;
 
             if (values != null)

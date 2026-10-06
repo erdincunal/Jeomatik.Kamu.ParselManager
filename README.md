@@ -18,10 +18,10 @@ Windows, Visual Studio 2022 (.NET masaüstü geliştirme iş yükü) ve .NET Fra
 Kamu7/
 ├── Manager/                         # Bu depo
 ├── Kamu.Data/src/Kamu.Data/          # Kamu.Data.csproj
-└── ObjectModel/bin/Release/          # Kamu.Object.dll
+└── ObjectModel/                     # KamuObject.csproj (Kamu.Object)
 ```
 
-`Kamu.Data` kaynak projesi proje referansıyla, `Kamu.Object.dll` ise göreli dosya referansıyla kullanılır. Yalnızca bu depoyu klonlamak bütün bağımlılıkları sağlamaz. Önce uyumlu ObjectModel ve Kamu.Data projelerini hazırlayın, ardından `ParselManager.sln` çözümünü açın.
+`Kamu.Data` ve `Kamu.Object` kaynak projeleri göreli proje referanslarıyla kullanılır. Yalnızca bu depoyu klonlamak bütün bağımlılıkları sağlamaz. Uyumlu ObjectModel ve Kamu.Data kaynaklarını yukarıdaki konumlara yerleştirin, ardından `ParselManager.sln` çözümünü açın. Derleme çıktısı klasörlerini kaynak bağımlılığı olarak kopyalamak gerekmez.
 
 Visual Studio Developer PowerShell üzerinden:
 
@@ -35,6 +35,34 @@ MSBuild.exe ParselManager.sln /t:Build /p:Configuration=Release
 
 Ana uygulama `Dashboard.Manager` kontrolünü barındırır. Açık projenin `KamuDatabase.ConnectionInfo` nesnesiyle `SetConnection(connectionInfo)` çağrılır; ardından `FillListView(parselGlobalID, Manager.ListViewType.Tum)` seçili parseli yükler. `Clear` ilgili görünümü temizler. Veri erişimi için geçerli proje bağlantısı gereklidir.
 
+```csharp
+var panel = new Dashboard.Manager();
+panel.SetConnection(connectionInfo);
+panel.FillListView(parselGlobalID, Manager.ListViewType.Tum);
+```
+
+Kontrol işlemlerini Windows Forms UI iş parçacığında çağırın. `ListViewType.Kisi` için verilen kimlik kişi kimliğidir; bu görünüm parsel listelerini korur. `SetConnection`, eski proje seçimlerini ve kod açıklaması önbelleğini temizleyerek yeni projenin kod listelerini yükler.
+
+## Yenileme ve düzenleme davranışı
+
+- Liste yenilemelerinde satırlarla birlikte gruplar da temizlenir; çizim olayları tekrar bağlanmaz.
+- Dava ve kamulaştırma listeleri mevcut kayıtlardaki türlere göre gruplanır. Kodların ardışık olması gerekmez; bilinmeyen kodlar hata açıklamasıyla görünür.
+- Müştemilat ve mevsimlik malik sorguları bir yenileme boyunca kişi kimliğine göre paylaşılır. Kod açıklamaları bağlantı değişene kadar önbellekte tutulur.
+- PropertyGrid kod seçimleri nesneler değiştirilmeden önce doğrulanır. Değiştirilmemiş eski kodlar korunur; geçersiz yeni seçimler reddedilir.
+- Malik düzenlemelerinde yalnız ilgili kişi veya hisse kaydı güncellenir. Mirasçı görünümünde hisse bulunmayabilir.
+
+## Regresyon kontrolleri
+
+Kardeş projelerin uyumlu Release çıktıları hazırken, depo kökünden PowerShell ile:
+
+```powershell
+.\Tests\Run-RegressionTests.ps1
+```
+
+Betik Visual Studio MSBuild konumunu bulur, Manager projesini `BuildProjectReferences=false` ile Release olarak derler ve .NET Framework test programını çalıştırır. Kardeş projeleri yeniden derlemez; eksik veya eski çıktılar varsa önce çözümü normal şekilde derleyin. Test çıktıları `bin/Release` altına yazılır ve Git'e dahil edilmez.
+
+Kontroller veritabanına bağlanmadan kişi görünümünde listelerin korunmasını, grupların temizlenmesini, başlık çizim davranışını, kod dönüştürmeyi ve doğrulama hatasında parselin kısmen değişmemesini sınar. Gerçek veritabanındaki okuma/yazma işlemleri ve ana uygulamadaki etkileşimler ayrıca entegrasyon kontrolü gerektirir.
+
 ## Kaynak dosyaları
 
 | Dosya | Görev |
@@ -44,5 +72,6 @@ Ana uygulama `Dashboard.Manager` kontrolünü barındırır. Açık projenin `Ka
 | `Manager.GridModel.cs` | PropertyGrid modelleri, kod listeleri ve Türkçe değer dönüştürücüleri |
 | `Panel.cs` | Özet veri modeli ve `ListViewType` |
 | `Properties/AssemblyInfo.cs` | Derleme kimliği ve sürüm bilgisi |
+| `Tests/RegressionTests.cs`, `Tests/Run-RegressionTests.ps1` | Veritabanı gerektirmeyen regresyon kontrolleri ve çalıştırıcı |
 
 Derleme çıktıları, IDE ayarları ve yerel kimlik bilgileri depoya dahil edilmez. Veritabanı ve kullanıcı verileri bu deponun parçası değildir.
